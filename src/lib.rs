@@ -5,7 +5,6 @@ pub use crossterm::style::{
     Color,
     Attribute, Attributes
 };
-use crossterm::style::{Print, PrintStyledContent, SetStyle};
 
 
 #[derive(Clone)]
@@ -74,6 +73,12 @@ impl TerminalRenderingEngine {
 
     pub fn render(&self) {
         todo!()
+        // Save cursor position
+        // Create list of differences and positions
+        // if concurrent chars have same styling, combine into string and one print statement
+        // Flush stdout
+        // Update display_buffer
+        // Return cursor to initial position
     }
 
     fn is_valid_pos(&self, pos: &(usize, usize)) -> bool {
@@ -86,21 +91,12 @@ impl TerminalRenderingEngine {
     }
 
     //todo add various drawing methods (String, char, change region style etc)
-    pub fn draw_char(&mut self, pos: (usize, usize), char: char) {
-        if !self.is_valid_pos(&pos) { return; }
-        self.current_buffer[pos.0][pos.1] = StyledChar::from(char)
-    }
-
-    pub fn draw_styled_char(&mut self, pos: (usize, usize), styled_char: StyledChar) {
-        if !self.is_valid_pos(&pos) { return; }
-        self.current_buffer[pos.0][pos.1] = styled_char
-    }
-
-    pub fn draw_styled_string(&mut self, pos: (usize, usize), str: String, style: ContentStyle) {
-        // Pos is index to start inserting string from
-        // If string exceeds area, it is ignored
+    pub fn draw<T: std::fmt::Display>(&mut self, pos: (usize, usize), item: T) {
+        // Pos is index to start inserting item from
+        // If item exceeds area, it is ignored
         if !self.is_valid_pos(&pos) { return; }
 
+        let str = item.to_string();
         let mut chars = str.chars();
         for i in 0..str.len() {
             // If there is a char
@@ -109,7 +105,26 @@ impl TerminalRenderingEngine {
                 // Don't bother with the rest
                 if pos.0+i >= self.size.0 { return; }
 
-                self.current_buffer[pos.0+i][pos.1] = StyledChar { char: c, style: style.clone() }
+                self.current_buffer[pos.0+i][pos.1] = StyledChar::from(c)
+
+            }
+        }
+    }
+    pub fn draw_styled<T: std::fmt::Display>(&mut self, pos: (usize, usize), item: T, style: ContentStyle) {
+        // Pos is index to start inserting item from
+        // If item exceeds area, it is ignored
+        if !self.is_valid_pos(&pos) { return; }
+
+        let str = item.to_string();
+        let mut chars = str.chars();
+        for i in 0..str.len() {
+            // If there is a char
+            if let Some(c) = chars.next() {
+
+                // Don't bother with the rest
+                if pos.0+i >= self.size.0 { return; }
+
+                self.current_buffer[pos.0+i][pos.1] = StyledChar{ char: c, style: style.clone() }
 
             }
         }
