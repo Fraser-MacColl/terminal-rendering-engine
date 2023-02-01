@@ -1,14 +1,59 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+// Re-export enums and structs used in library
+// Why reinvent the wheel?
+pub use crossterm::style::{
+    ContentStyle, StyledContent,
+    Color,
+    Attribute, Attributes
+};
+
+struct StyledChar {
+    // Default is an empty (space) char with no colouring or attributes
+    char: char,
+    style: ContentStyle
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+impl Default for StyledChar {
+    fn default() -> Self {
+        todo!()
     }
+}
+
+
+
+pub struct TerminalRenderingEngine {
+    // End user struct that holds drawing area information
+
+    position: (usize, usize),
+    size: (usize, usize),
+
+    // If buffer should clear after every update, or keep previous state which can then be edited as necessary
+    clear_buffer: bool,
+
+    // Buffers that hold what's currently displayed, along with editable buffer
+    // None represents a pos with an unknown state, which will be forced to update next render
+    //
+    // If render area is resized larger, terminal chars with unknown states will be within region.
+    // If they already are styled, this won't necessarily be updated unless forced to do so.
+    display_buffer: Vec<Vec<Option<StyledChar>>>,
+    current_buffer: Vec<Vec<StyledChar>>
+}
+
+impl TerminalRenderingEngine {
+    fn new() -> TerminalRenderingEngine {
+        todo!()
+    }
+
+    fn update_size(&mut self, size: (usize, usize)) {
+        todo!()
+    }
+
+    fn update_pos(&mut self, pos: (usize, usize)) {
+        todo!()
+    }
+
+    fn render(&self) {
+        todo!()
+    }
+
+    //todo add various drawing methods (String, char, change region style etc)
 }
