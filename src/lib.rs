@@ -6,6 +6,8 @@ pub use crossterm::style::{
     Attribute, Attributes
 };
 
+use crossterm::style::{PrintStyledContent, Print};
+use std::io::{stdout, Write};
 
 #[derive(Clone)]
 pub struct StyledChar {
@@ -79,6 +81,18 @@ impl TerminalRenderingEngine {
         // Flush stdout
         // Update display_buffer
         // Return cursor to initial position
+    }
+    fn debug_render(&self) {
+        for y in 0..self.size.1 {
+            for x in 0..self.size.0 {
+                let sc = StyledContent::new(self.current_buffer[x][y].style, self.current_buffer[x][y].char);
+                crossterm::queue!(stdout(), PrintStyledContent(sc)).unwrap();
+            }
+
+            crossterm::queue!(stdout(), Print("\n")).unwrap();
+        }
+
+        stdout().flush().unwrap();
     }
 
     fn is_valid_pos(&self, pos: &(usize, usize)) -> bool {
