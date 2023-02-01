@@ -6,15 +6,30 @@ pub use crossterm::style::{
     Attribute, Attributes
 };
 
+
+
+#[derive(Clone)]
 struct StyledChar {
     // Default is an empty (space) char with no colouring or attributes
     char: char,
     style: ContentStyle
 }
 
+impl From<char> for StyledChar {
+    fn from(char: char) -> Self {
+        StyledChar {
+            char,
+            style: ContentStyle::default()
+        }
+    }
+}
+
 impl Default for StyledChar {
     fn default() -> Self {
-        todo!()
+        StyledChar {
+            char: ' ',
+            style: ContentStyle::default() //Default is None colour, no attributes
+        }
     }
 }
 
@@ -39,8 +54,14 @@ pub struct TerminalRenderingEngine {
 }
 
 impl TerminalRenderingEngine {
-    fn new() -> TerminalRenderingEngine {
-        todo!()
+    fn new(position: (usize, usize), size: (usize, usize), clear_buffer: bool) -> TerminalRenderingEngine {
+        TerminalRenderingEngine {
+            position,
+            size,
+            clear_buffer,
+            display_buffer: vec![vec![None; size.1]; size.0],
+            current_buffer: vec![vec![StyledChar::default(); size.1]; size.0]
+        }
     }
 
     fn update_size(&mut self, size: (usize, usize)) {
