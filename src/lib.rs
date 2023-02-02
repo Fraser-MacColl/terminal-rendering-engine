@@ -1,8 +1,8 @@
 use std::fmt::Display;
-use crossterm::style::PrintStyledContent;
+use crossterm::style::{PrintStyledContent, Stylize};
 use std::io::{stdout, Write};
 use std::ops::Range;
-use crossterm::queue;
+use crossterm::{execute, queue};
 use crossterm::cursor::MoveTo;
 
 // Re-export enums and structs used in library
@@ -16,8 +16,8 @@ pub use crossterm::style::{
 #[derive(Clone, PartialEq, Eq)]
 pub struct StyledChar {
     // Default is an empty (space) char with no colouring or attributes
-    char: char,
-    style: ContentStyle
+    pub char: char,
+    pub style: ContentStyle
 }
 
 impl From<char> for StyledChar {
@@ -56,6 +56,9 @@ pub struct TerminalRenderingEngine {
 
     // If buffer should clear after every update, or keep previous state which can then be edited as necessary
     clear_buffer: bool,
+
+    // Prints extra debug information at a set absolute location on terminal
+    debug: bool,
     default_char: StyledChar,
 
     // Buffers that hold what's currently displayed, along with editable buffer
@@ -69,24 +72,63 @@ pub struct TerminalRenderingEngine {
 
 impl TerminalRenderingEngine {
 
-    pub fn new(position: (usize, usize), size: (usize, usize), clear_buffer: bool) -> TerminalRenderingEngine {
+    pub fn new(position: (usize, usize), size: (usize, usize)) -> TerminalRenderingEngine {
         TerminalRenderingEngine {
             position,
             size,
-            clear_buffer,
+            clear_buffer: false,
+            debug: false,
             default_char: StyledChar::default(),
             display_buffer: vec![vec![None; size.1]; size.0],
             current_buffer: vec![vec![StyledChar::default(); size.1]; size.0]
         }
     }
 
-    pub fn update_size(&mut self, size: (usize, usize)) {
-        todo!()
+    pub fn get_size(&self) -> &(usize, usize) { &self.size }
+    pub fn set_size(&mut self, size: (usize, usize)) {
+        // Resizes vecs to to fit new size
+
+        /*
+        Ok things get weird with the order of resizing
+
+        When indexing with [x][y], it means the vecs are being stored as:
+            - Outer vec of columns, each column being of the same X val
+            - Inner vec of chars within the column, each having a different Y val
+
+        So when resizing the inner vec, you have to resize to the new Y size,
+        and vice versa for the outer
+         */
+
+        // current_buffer
+        for x in 0..self.size.0 {
+            self.current_buffer[x].resize(size.1, self.default_char.clone())
+        }
+        self.current_buffer.resize(size.0, vec![self.default_char.clone(); size.1]);
+
+        // display_buffer
+        for x in 0..self.size.0 {
+            self.display_buffer[x].resize(size.1, None)
+        }
+        self.display_buffer.resize(size.0, vec![None; size.1]);
+
+        // Set new size var
+        self.size = size
     }
 
-    pub fn update_pos(&mut self, pos: (usize, usize)) {
-        todo!()
+    pub fn get_position(&self) -> &(usize, usize) { &self.size }
+    pub fn set_position(&mut self, pos: (usize, usize)) { self.position = pos }
+
+    pub fn get_default_char(&self) -> &StyledChar { &self.default_char }
+    pub fn set_default_char(&mut self, default_char: StyledChar) { self.default_char = default_char }
+
+    pub fn set_clear_on_render(&mut self, clear: bool) {
+        // Whether or not the current_buffer should be cleared every time
+        // render is called. Does not affect the number of print calls
+        // given the same current_buffer
+
+        self.clear_buffer = clear;
     }
+    pub fn set_debug(&mut self, debug: bool) { self.debug = debug }
 
 
 
@@ -96,37 +138,41 @@ impl TerminalRenderingEngine {
     // | RENDERING |
     // #-----------#
 
-    pub fn render(&mut self) {
+    pub fn render(&mut self) -> usize {
+        // Main render method
+        // Returns number of print calls made
+
         // Save cursor position, to be returned to later
         queue!(stdout(), crossterm::cursor::SavePosition).unwrap();
 
-        let mut updated_pos = self.get_updated_positions();
-        let mut commands = vec![];
+        let updated_chars = self.get_updated_positions();
+        let mut commands = Vec::new();
 
 
         // Add a print command for every char that has been updated
-        for pos in &updated_pos {
+        for pos in &updated_chars {
             commands.push(PrintStyledContent(self.current_buffer[pos.0][pos.1].clone().into()));
         }
 
 
         // Combine consecutive print commands that have the same styling
-        self.combine_print_cmds(&mut commands, &mut updated_pos);
+        let mut cmd_pos = updated_chars.clone();
+        self.combine_print_cmds(&mut commands, &mut cmd_pos);
 
 
         // Queue each print command, add extra move mouse if they aren't consecutive
-        self.queue_print_cmds(&commands, &updated_pos);
+        self.queue_print_cmds(&commands, &cmd_pos);
 
 
         // Update display_buffer
             // For each position in the diff list, clone the current_buffer into display_buffer position
             // If clear_buffer = true, clear the current_buffer
-        for pos in &updated_pos {
+        for pos in &updated_chars {
             self.display_buffer[pos.0][pos.1] = Some(self.current_buffer[pos.0][pos.1].clone())
         }
 
         if self.clear_buffer {
-            for pos in &updated_pos {
+            for pos in &updated_chars {
                 self.current_buffer[pos.0][pos.1] = StyledChar::default()
             }
         }
@@ -134,6 +180,27 @@ impl TerminalRenderingEngine {
 
         queue!(stdout(), crossterm::cursor::RestorePosition).unwrap();
         stdout().flush().unwrap();
+
+        // Extra debug printing
+        // After rest of printing so it will always be on top
+        if self.debug {
+            let style = ContentStyle::new().black().on_white();
+
+            let line1 = StyledContent::new(
+                style,
+                format!("num updt: {:6}", updated_chars.len())
+            );
+            let line2 = StyledContent::new(
+                style,
+                format!("num cmds: {:6}", commands.len())
+            );
+            execute!(stdout(),
+                MoveTo(0, 0), PrintStyledContent(line1),
+                MoveTo(0, 1), PrintStyledContent(line2)
+            ).unwrap();
+        }
+
+        commands.len()
     }
     
     fn get_updated_positions(&self) -> Vec<(usize, usize)> {
@@ -164,6 +231,9 @@ impl TerminalRenderingEngine {
 
     fn combine_print_cmds(&self, cmd_vec: &mut Vec<PrintStyledContent<String>>, pos_vec: &mut Vec<(usize, usize)>) {
         // Combines print cmd_vec that are consecutive and have the same styling
+
+        // Check there is at least 2 cmds to combine
+        if cmd_vec.len() < 2 { return }
 
         let mut i = 0;
         while i < cmd_vec.len()-1 {
@@ -341,10 +411,10 @@ impl TerminalRenderingEngine {
         // Change the style for a group of chars in the square specified
 
         for y in y_range {
-            if y < self.size.1 { break }
+            if y >= self.size.1 { break }
 
             for x in x_range.clone() { // Clone as using it here turns it into a iter, which consumes values, then being unable to use next loop
-                if x < self.size.0 { break } // Break if we're indexing outside valid area
+                if x >= self.size.0 { break } // Break if we're indexing outside valid area
 
                 self.current_buffer[x][y].style = style.clone()
             }
