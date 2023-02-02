@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use crossterm::style::PrintStyledContent;
 use std::io::{stdout, Write};
+use std::ops::Range;
 use crossterm::queue;
 use crossterm::cursor::MoveTo;
 
@@ -55,6 +56,7 @@ pub struct TerminalRenderingEngine {
 
     // If buffer should clear after every update, or keep previous state which can then be edited as necessary
     clear_buffer: bool,
+    default_char: StyledChar,
 
     // Buffers that hold what's currently displayed, along with editable buffer
     // None represents a pos with an unknown state, which will be forced to update next render
@@ -72,6 +74,7 @@ impl TerminalRenderingEngine {
             position,
             size,
             clear_buffer,
+            default_char: StyledChar::default(),
             display_buffer: vec![vec![None; size.1]; size.0],
             current_buffer: vec![vec![StyledChar::default(); size.1]; size.0]
         }
@@ -258,7 +261,6 @@ impl TerminalRenderingEngine {
         true
     }
 
-    //todo add various drawing methods (String, char, change region style etc)
     pub fn draw<T: Display>(&mut self, pos: (usize, usize), item: T) {
         // Pos is index to start inserting item from
         // If item exceeds area, it is ignored
@@ -278,7 +280,6 @@ impl TerminalRenderingEngine {
             }
         }
     }
-
     pub fn draw_styled<T: Display>(&mut self, pos: (usize, usize), item: T, style: ContentStyle) {
         // Pos is index to start inserting item from
         // If item exceeds area, it is ignored
@@ -295,6 +296,66 @@ impl TerminalRenderingEngine {
 
                 self.current_buffer[pos.0+i][pos.1] = StyledChar{ char: c, style: style.clone() }
 
+            }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        // Clears the area with default char
+
+        for y in 0..self.size.1 {
+            for x in 0..self.size.0 {
+                self.current_buffer[x][y] = self.default_char.clone();
+            }
+        }
+    }
+    pub fn fill(&mut self, fill_char: StyledChar) {
+        // Fills area with specific char
+
+        for y in 0..self.size.1 {
+            for x in 0..self.size.0 {
+                self.current_buffer[x][y] = fill_char.clone()
+            }
+        }
+    }
+    pub fn fill_row(&mut self, row: usize, fill_char: StyledChar) {
+        // Fills a row with a character
+
+        if row >= self.size.1 { return; } // index OOB
+
+        for x in 0..self.size.0 {
+            self.current_buffer[x][row] = fill_char.clone()
+        }
+    }
+    pub fn fill_column(&mut self, column: usize, fill_char: StyledChar) {
+        // Fills a column with a character
+
+        if column >= self.size.0 { return; } // index OOB
+
+        for y in 0..self.size.1 {
+            self.current_buffer[column][y] = fill_char.clone()
+        }
+    }
+
+    pub fn set_style_square(&mut self, x_range: Range<usize>, y_range: Range<usize>, style: ContentStyle) {
+        // Change the style for a group of chars in the square specified
+
+        for y in y_range {
+            if y < self.size.1 { break }
+
+            for x in x_range.clone() { // Clone as using it here turns it into a iter, which consumes values, then being unable to use next loop
+                if x < self.size.0 { break } // Break if we're indexing outside valid area
+
+                self.current_buffer[x][y].style = style.clone()
+            }
+        }
+    }
+    pub fn set_global_style(&mut self, style: ContentStyle) {
+        // Sets the style for all tiles
+
+        for y in 0..self.size.1 {
+            for x in 0..self.size.0 {
+                self.current_buffer[x][y].style = style.clone()
             }
         }
     }
