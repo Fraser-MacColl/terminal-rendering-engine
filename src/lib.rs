@@ -45,6 +45,8 @@ impl Default for StyledChar {
 
 
 
+
+
 pub struct TerminalRenderingEngine {
     // End user struct that holds drawing area information
 
@@ -89,34 +91,21 @@ impl TerminalRenderingEngine {
         let mut updated_pos = self.get_updated_positions();
         let mut commands = vec![];
 
-        // Add print commands to vec
+
+
+        // Add a print command for every char that has been updated
         for pos in &updated_pos {
             commands.push(PrintStyledContent(self.current_buffer[pos.0][pos.1].clone().into()));
         }
 
+
         // Combine consecutive print commands that have the same styling
-        TerminalRenderingEngine::combine_print_cmds(&mut commands, &mut updated_pos);
+        self.combine_print_cmds(&mut commands, &mut updated_pos);
+
 
         // Queue each print command, add extra move mouse if they aren't consecutive
-        if !commands.is_empty() {
-            let mut abs_pos = self.to_absolute_pos(updated_pos[0]);
-            queue!(stdout(), MoveTo(abs_pos.0, abs_pos.1)).unwrap();
+        self.queue_print_cmds(&commands, &updated_pos);
 
-            for i in 0..(commands.len()-1) {
-                queue!(stdout(), commands[i].clone()).unwrap();
-
-                // If there is no jump (i.e they are consecutive), skip cursor move
-                if updated_pos[i].1 == updated_pos[i+1].1         // Same Y
-                    && updated_pos[i].0+1 == updated_pos[i+1].0 { // Next is one x ahead
-                    continue
-                }
-
-                abs_pos = self.to_absolute_pos(updated_pos[i+1]);
-                queue!(stdout(), MoveTo(abs_pos.0, abs_pos.1)).unwrap();
-            }
-
-            queue!(stdout(), commands[commands.len()-1].clone()).unwrap();
-        }
 
         // Update display_buffer
             // For each position in the diff list, clone the current_buffer into display_buffer position
@@ -162,7 +151,7 @@ impl TerminalRenderingEngine {
         vec
     }
 
-    fn combine_print_cmds(cmd_vec: &mut Vec<PrintStyledContent<String>>, pos_vec: &mut Vec<(usize, usize)>) {
+    fn combine_print_cmds(&self, cmd_vec: &mut Vec<PrintStyledContent<String>>, pos_vec: &mut Vec<(usize, usize)>) {
         // Combines print cmd_vec that are consecutive and have the same styling
         let mut i = 0;
         while i < cmd_vec.len()-1 {
@@ -199,7 +188,46 @@ impl TerminalRenderingEngine {
             i+=1;
         }
     }
-    
+
+    fn queue_print_cmds(&self, cmd_vec: &Vec<PrintStyledContent<String>>, pos_vec: &Vec<(usize, usize)>) {
+        // Takes a vec of print commands, and a vec of locations for those prints
+        // Adds each print cmd to queue, while also adding in mouse move cmds if necessary
+
+
+        // If there's nothing to do, just exit
+        if cmd_vec.is_empty() { return; }
+
+
+        // abs_pos is the position on the terminal
+        // Is the position in the vec, plus the engine position as an offset
+        let mut abs_pos = self.to_absolute_pos(pos_vec[0]);
+        queue!(stdout(), MoveTo(abs_pos.0, abs_pos.1)).unwrap();
+
+
+        // len-1 because we will manually handle last command and don't want indexOOB
+        // queue print -> check if the i+1 location is consecutive -> skip move cmd else queue move
+        for i in 0..(cmd_vec.len()-1) {
+
+            // Clone as queue takes ownership
+            // I think there should be a way to use iterator
+            // or something, since I don't need vec after this
+            queue!(stdout(), cmd_vec[i].clone()).unwrap();
+
+            // If there is no jump (i.e they are consecutive), skip cursor move
+            if pos_vec[i].1 == pos_vec[i+1].1         // Same Y
+                && pos_vec[i].0+1 == pos_vec[i+1].0 { // Next is one x ahead
+                continue
+            }
+
+            abs_pos = self.to_absolute_pos(pos_vec[i+1]);
+            queue!(stdout(), MoveTo(abs_pos.0, abs_pos.1)).unwrap();
+        }
+
+
+        // Handle last print cmd manually
+        queue!(stdout(), cmd_vec[cmd_vec.len()-1].clone()).unwrap();
+    }
+
     // fn debug_render(&self) {
     //     for y in 0..self.size.1 {
     //         for x in 0..self.size.0 {
