@@ -1,4 +1,9 @@
 use std::fmt::Display;
+use crossterm::style::PrintStyledContent;
+use std::io::{stdout, Write};
+use crossterm::queue;
+use crossterm::cursor::MoveTo;
+
 // Re-export enums and structs used in library
 // Why reinvent the wheel?
 pub use crossterm::style::{
@@ -6,11 +11,6 @@ pub use crossterm::style::{
     Color,
     Attribute, Attributes
 };
-
-use crossterm::style::{PrintStyledContent, Print};
-use std::io::{stdout, Write};
-use crossterm::{Command, queue};
-use crossterm::cursor::MoveTo;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct StyledChar {
@@ -92,7 +92,6 @@ impl TerminalRenderingEngine {
         let mut commands = vec![];
 
 
-
         // Add a print command for every char that has been updated
         for pos in &updated_pos {
             commands.push(PrintStyledContent(self.current_buffer[pos.0][pos.1].clone().into()));
@@ -153,6 +152,7 @@ impl TerminalRenderingEngine {
 
     fn combine_print_cmds(&self, cmd_vec: &mut Vec<PrintStyledContent<String>>, pos_vec: &mut Vec<(usize, usize)>) {
         // Combines print cmd_vec that are consecutive and have the same styling
+
         let mut i = 0;
         while i < cmd_vec.len()-1 {
             // If they are NOT consecutive
@@ -171,16 +171,15 @@ impl TerminalRenderingEngine {
                 new_content.push_str(content2.to_string().as_str());
 
                 let new_cmd = PrintStyledContent(
-                    StyledContent::new(cmd_vec[i].0.style().clone(), new_content)
+                    StyledContent::new(*cmd_vec[i].0.style(), new_content)
                 );
 
                 // Replace first two items in vec with new command
-                cmd_vec.drain(i..(i+2));
-                cmd_vec.insert(i, new_cmd);
+                cmd_vec[i] = new_cmd;
+                cmd_vec.remove(i+1);
                 pos_vec.remove(i+1);
 
-                // Undo increment, because we want to compare
-                // the new ith to what was i+2th, now i+1th element
+                // Skip incrementation, as we want to compare new ith object to i+1 object
                 continue
             }
 
@@ -205,15 +204,12 @@ impl TerminalRenderingEngine {
 
 
         // len-1 because we will manually handle last command and don't want indexOOB
-        // queue print -> check if the i+1 location is consecutive -> skip move cmd else queue move
         for i in 0..(cmd_vec.len()-1) {
+            queue!(stdout(), cmd_vec[i].clone()).unwrap(); // Clone as queue takes ownership
+                                                           // I think there should be a way to use iterator
+                                                           // or something, since I don't need vec after this
 
-            // Clone as queue takes ownership
-            // I think there should be a way to use iterator
-            // or something, since I don't need vec after this
-            queue!(stdout(), cmd_vec[i].clone()).unwrap();
-
-            // If there is no jump (i.e they are consecutive), skip cursor move
+            // Consecutive check
             if pos_vec[i].1 == pos_vec[i+1].1         // Same Y
                 && pos_vec[i].0+1 == pos_vec[i+1].0 { // Next is one x ahead
                 continue
