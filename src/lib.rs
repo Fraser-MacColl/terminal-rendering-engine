@@ -1,3 +1,4 @@
+use std::fmt::Display;
 // Re-export enums and structs used in library
 // Why reinvent the wheel?
 pub use crossterm::style::{
@@ -8,8 +9,10 @@ pub use crossterm::style::{
 
 use crossterm::style::{PrintStyledContent, Print};
 use std::io::{stdout, Write};
+use crossterm::{Command, queue};
+use crossterm::cursor::MoveTo;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct StyledChar {
     // Default is an empty (space) char with no colouring or attributes
     char: char,
@@ -22,6 +25,12 @@ impl From<char> for StyledChar {
             char,
             style: ContentStyle::default()
         }
+    }
+}
+
+impl From<StyledChar> for StyledContent<String> {
+    fn from(styled_char: StyledChar) -> Self {
+        StyledContent::new(styled_char.style, styled_char.char.to_string())
     }
 }
 
@@ -73,27 +82,147 @@ impl TerminalRenderingEngine {
         todo!()
     }
 
-    pub fn render(&self) {
-        todo!()
-        // Save cursor position
-        // Create list of differences and positions
-        // if concurrent chars have same styling, combine into string and one print statement
-        // Flush stdout
-        // Update display_buffer
-        // Return cursor to initial position
-    }
-    fn debug_render(&self) {
-        for y in 0..self.size.1 {
-            for x in 0..self.size.0 {
-                let sc = StyledContent::new(self.current_buffer[x][y].style, self.current_buffer[x][y].char);
-                crossterm::queue!(stdout(), PrintStyledContent(sc)).unwrap();
-            }
+    pub fn render(&mut self) {
+        // Save cursor position, to be returned to later
+        queue!(stdout(), crossterm::cursor::SavePosition).unwrap();
 
-            crossterm::queue!(stdout(), Print("\n")).unwrap();
+        let mut updated_pos = self.get_updated_positions();
+        let mut commands = vec![];
+
+        // Add print commands to vec
+        for pos in &updated_pos {
+            commands.push(PrintStyledContent(self.current_buffer[pos.0][pos.1].clone().into()));
         }
 
+        // Combine consecutive print commands that have the same styling
+        TerminalRenderingEngine::combine_print_cmds(&mut commands, &mut updated_pos);
+
+        // Queue each print command, add extra move mouse if they aren't consecutive
+        if !commands.is_empty() {
+            let mut abs_pos = self.to_absolute_pos(updated_pos[0]);
+            queue!(stdout(), MoveTo(abs_pos.0, abs_pos.1)).unwrap();
+
+            for i in 0..(commands.len()-1) {
+                queue!(stdout(), commands[i].clone()).unwrap();
+
+                // If there is no jump (i.e they are consecutive), skip cursor move
+                if updated_pos[i].1 == updated_pos[i+1].1         // Same Y
+                    && updated_pos[i].0+1 == updated_pos[i+1].0 { // Next is one x ahead
+                    continue
+                }
+
+                abs_pos = self.to_absolute_pos(updated_pos[i+1]);
+                queue!(stdout(), MoveTo(abs_pos.0, abs_pos.1)).unwrap();
+            }
+
+            queue!(stdout(), commands[commands.len()-1].clone()).unwrap();
+        }
+
+        // Update display_buffer
+            // For each position in the diff list, clone the current_buffer into display_buffer position
+            // If clear_buffer = true, clear the current_buffer
+        for pos in &updated_pos {
+            self.display_buffer[pos.0][pos.1] = Some(self.current_buffer[pos.0][pos.1].clone())
+        }
+
+        if self.clear_buffer {
+            for pos in &updated_pos {
+                self.current_buffer[pos.0][pos.1] = StyledChar::default()
+            }
+        }
+
+
+        queue!(stdout(), crossterm::cursor::RestorePosition).unwrap();
         stdout().flush().unwrap();
     }
+    
+    fn get_updated_positions(&self) -> Vec<(usize, usize)> {
+        // Checks each current_buffer tile to the relative display_buffer tile to see if anything has changed
+        // Returns a list of positions that a change has occurred
+
+        let mut vec = vec![];
+
+        for y in 0..self.size.1 {
+            for x in 0..self.size.0 {
+
+                if self.display_buffer[x][y].is_none() {
+                    vec.push((x, y))
+                }
+
+                // I can only compare the value in the display option if I unwrap,
+                // but I can only unwrap if it's a ref or else it takes ownership/consumes the value
+                // Therefor LHS has to be ref as well so it is same type
+                else if &self.current_buffer[x][y] != self.display_buffer[x][y].as_ref().unwrap() {
+                    vec.push((x, y))
+                }
+
+            }
+        }
+
+        vec
+    }
+
+    fn combine_print_cmds(cmd_vec: &mut Vec<PrintStyledContent<String>>, pos_vec: &mut Vec<(usize, usize)>) {
+        // Combines print cmd_vec that are consecutive and have the same styling
+        let mut i = 0;
+        while i < cmd_vec.len()-1 {
+            // If they are NOT consecutive
+            if pos_vec[i].0+1 != pos_vec[i+1].0 {
+                i+=1;
+                continue
+            }
+
+            if cmd_vec[i].0.style() == cmd_vec[i+1].0.style() {
+                // Combine the content
+                let content1 = cmd_vec[i].0.content();
+                let content2 = cmd_vec[i+1].0.content();
+
+                // I'm getting the feeling like this is bad and wrong
+                let mut new_content: String = content1.to_string();
+                new_content.push_str(content2.to_string().as_str());
+
+                let new_cmd = PrintStyledContent(
+                    StyledContent::new(cmd_vec[i].0.style().clone(), new_content)
+                );
+
+                // Replace first two items in vec with new command
+                cmd_vec.drain(i..(i+2));
+                cmd_vec.insert(i, new_cmd);
+                pos_vec.remove(i+1);
+
+                // Undo increment, because we want to compare
+                // the new ith to what was i+2th, now i+1th element
+                continue
+            }
+
+            // Increment
+            i+=1;
+        }
+    }
+    
+    // fn debug_render(&self) {
+    //     for y in 0..self.size.1 {
+    //         for x in 0..self.size.0 {
+    //             let sc = StyledContent::new(self.current_buffer[x][y].style, self.current_buffer[x][y].char);
+    //             queue!(stdout(), PrintStyledContent(sc)).unwrap();
+    //         }
+    //
+    //         queue!(stdout(), Print("\n")).unwrap();
+    //     }
+    //
+    //     stdout().flush().unwrap();
+    // }
+
+    fn to_absolute_pos(&self, pos: (usize, usize)) -> (u16, u16) {
+        // Takes a relative position and turns it into absolute position on terminal
+        // u16 so it is ready to be used in MoveTo commands
+
+        ((pos.0+self.position.0) as u16, (pos.1+self.position.1) as u16)
+    }
+
+    
+
+
 
     fn is_valid_pos(&self, pos: &(usize, usize)) -> bool {
         // Validate pos is within area
@@ -105,7 +234,7 @@ impl TerminalRenderingEngine {
     }
 
     //todo add various drawing methods (String, char, change region style etc)
-    pub fn draw<T: std::fmt::Display>(&mut self, pos: (usize, usize), item: T) {
+    pub fn draw<T: Display>(&mut self, pos: (usize, usize), item: T) {
         // Pos is index to start inserting item from
         // If item exceeds area, it is ignored
         if !self.is_valid_pos(&pos) { return; }
@@ -124,7 +253,7 @@ impl TerminalRenderingEngine {
             }
         }
     }
-    pub fn draw_styled<T: std::fmt::Display>(&mut self, pos: (usize, usize), item: T, style: ContentStyle) {
+    pub fn draw_styled<T: Display>(&mut self, pos: (usize, usize), item: T, style: ContentStyle) {
         // Pos is index to start inserting item from
         // If item exceeds area, it is ignored
         if !self.is_valid_pos(&pos) { return; }
