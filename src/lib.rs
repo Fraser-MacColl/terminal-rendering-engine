@@ -66,6 +66,7 @@ pub struct TerminalRenderingEngine {
 }
 
 impl TerminalRenderingEngine {
+
     pub fn new(position: (usize, usize), size: (usize, usize), clear_buffer: bool) -> TerminalRenderingEngine {
         TerminalRenderingEngine {
             position,
@@ -83,6 +84,14 @@ impl TerminalRenderingEngine {
     pub fn update_pos(&mut self, pos: (usize, usize)) {
         todo!()
     }
+
+
+
+
+
+    // #-----------#
+    // | RENDERING |
+    // #-----------#
 
     pub fn render(&mut self) {
         // Save cursor position, to be returned to later
@@ -224,19 +233,6 @@ impl TerminalRenderingEngine {
         queue!(stdout(), cmd_vec[cmd_vec.len()-1].clone()).unwrap();
     }
 
-    // fn debug_render(&self) {
-    //     for y in 0..self.size.1 {
-    //         for x in 0..self.size.0 {
-    //             let sc = StyledContent::new(self.current_buffer[x][y].style, self.current_buffer[x][y].char);
-    //             queue!(stdout(), PrintStyledContent(sc)).unwrap();
-    //         }
-    //
-    //         queue!(stdout(), Print("\n")).unwrap();
-    //     }
-    //
-    //     stdout().flush().unwrap();
-    // }
-
     fn to_absolute_pos(&self, pos: (usize, usize)) -> (u16, u16) {
         // Takes a relative position and turns it into absolute position on terminal
         // u16 so it is ready to be used in MoveTo commands
@@ -247,6 +243,11 @@ impl TerminalRenderingEngine {
     
 
 
+
+
+    // #-------------------#
+    // | USER MANIPULATION |
+    // #-------------------#
 
     fn is_valid_pos(&self, pos: &(usize, usize)) -> bool {
         // Validate pos is within area
@@ -277,6 +278,7 @@ impl TerminalRenderingEngine {
             }
         }
     }
+
     pub fn draw_styled<T: Display>(&mut self, pos: (usize, usize), item: T, style: ContentStyle) {
         // Pos is index to start inserting item from
         // If item exceeds area, it is ignored
