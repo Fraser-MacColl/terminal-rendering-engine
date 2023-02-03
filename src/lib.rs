@@ -1,5 +1,5 @@
 use std::fmt::Display;
-use crossterm::style::{PrintStyledContent, Stylize};
+use crossterm::style::{Print, PrintStyledContent, Stylize};
 use std::io::{stdout, Write};
 use std::ops::Range;
 use crossterm::{execute, queue};
@@ -146,7 +146,8 @@ impl TerminalRenderingEngine {
         queue!(stdout(), crossterm::cursor::SavePosition).unwrap();
 
         let updated_chars = self.get_updated_positions();
-        let mut commands = Vec::new();
+        let mut cmd_positions = updated_chars.clone();
+        let mut commands = vec![];
 
 
         // Add a print command for every char that has been updated
@@ -156,12 +157,11 @@ impl TerminalRenderingEngine {
 
 
         // Combine consecutive print commands that have the same styling
-        let mut cmd_pos = updated_chars.clone();
-        self.combine_print_cmds(&mut commands, &mut cmd_pos);
+        self.combine_print_cmds(&mut commands, &mut cmd_positions);
 
 
         // Queue each print command, add extra move mouse if they aren't consecutive
-        self.queue_print_cmds(&commands, &cmd_pos);
+        self.queue_print_cmds(&commands, &cmd_positions);
 
 
         // Update display_buffer
@@ -196,7 +196,8 @@ impl TerminalRenderingEngine {
             );
             execute!(stdout(),
                 MoveTo(0, 0), PrintStyledContent(line1),
-                MoveTo(0, 1), PrintStyledContent(line2)
+                MoveTo(0, 1), PrintStyledContent(line2),
+                crossterm::cursor::RestorePosition // Restore position again as it was moved again
             ).unwrap();
         }
 
@@ -231,41 +232,43 @@ impl TerminalRenderingEngine {
 
     fn combine_print_cmds(&self, cmd_vec: &mut Vec<PrintStyledContent<String>>, pos_vec: &mut Vec<(usize, usize)>) {
         // Combines print cmd_vec that are consecutive and have the same styling
-
         // Check there is at least 2 cmds to combine
         if cmd_vec.len() < 2 { return }
 
-        let mut i = 0;
-        while i < cmd_vec.len()-1 {
-            // If they are NOT consecutive
-            if pos_vec[i].0+1 != pos_vec[i+1].0 {
+        // Check each cmd to previous -> start i at 1
+        let mut i = 1;
+        while i < cmd_vec.len() {
+
+            // they are NOT consecutive AND they are on different rows
+            // Having to add content length cause pos vec indicates the start of the string to be printed
+            // Would always return false for cmds of 2 chars
+            if pos_vec[i].0 != pos_vec[i-1].0+cmd_vec[i-1].0.content().len() || pos_vec[i].1 != pos_vec[i-1].1 {
                 i+=1;
                 continue
             }
 
-            if cmd_vec[i].0.style() == cmd_vec[i+1].0.style() {
+            if cmd_vec[i].0.style() == cmd_vec[i-1].0.style() {
                 // Combine the content
-                let content1 = cmd_vec[i].0.content();
-                let content2 = cmd_vec[i+1].0.content();
+                let content1 = cmd_vec[i-1].0.content();
+                let content2 = cmd_vec[i].0.content();
 
                 // I'm getting the feeling like this is bad and wrong
-                let mut new_content: String = content1.to_string();
-                new_content.push_str(content2.to_string().as_str());
+                let mut new_content: String = content1.clone();
+                new_content.push_str(content2.clone().as_str());
 
                 let new_cmd = PrintStyledContent(
-                    StyledContent::new(*cmd_vec[i].0.style(), new_content)
+                    StyledContent::new(cmd_vec[i].0.style().clone(), new_content)
                 );
 
                 // Replace first two items in vec with new command
-                cmd_vec[i] = new_cmd;
-                cmd_vec.remove(i+1);
-                pos_vec.remove(i+1);
+                cmd_vec[i-1] = new_cmd;
+                cmd_vec.remove(i);
+                pos_vec.remove(i);
 
-                // Skip incrementation, as we want to compare new ith object to i+1 object
+                // Skip incrementation, as we want to compare new ith object to now combined i-1th object
                 continue
             }
 
-            // Increment
             i+=1;
         }
     }
@@ -313,7 +316,6 @@ impl TerminalRenderingEngine {
         ((pos.0+self.position.0) as u16, (pos.1+self.position.1) as u16)
     }
 
-    
 
 
 
