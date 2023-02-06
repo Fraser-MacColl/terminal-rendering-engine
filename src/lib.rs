@@ -4,7 +4,7 @@ pub mod style;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::hash::Hash;
-use crossterm::style::{Print, PrintStyledContent};
+use crossterm::style::PrintStyledContent;
 use std::io::{stdout, Write};
 use std::ops::Range;
 use crossterm::{execute, queue};
@@ -24,8 +24,8 @@ pub struct Engine<I> {
     // Map of windows/layers, along with an identifier for said window
     windows: HashMap<I, Window>,
 
-    // The char that should be used when clearing
-    clear_char: StyledChar,
+    // Whether or not extra debug information should be displayed
+    debug: bool,
 
     // Buffers for what is being currently displayed, and one that is being currently edited
     //
@@ -47,13 +47,15 @@ impl<I: Eq + Hash> Engine<I> {
     pub fn new(position: (usize, usize), size: (usize, usize)) -> Engine<I> {
         Engine {
             windows: HashMap::new(),
-            clear_char: StyledChar::default(),
+            debug: false,
             display_buffer: vec![vec![None; size.1]; size.0],
             current_buffer: vec![vec![None; size.1]; size.0],
             position,
             size,
         }
     }
+
+    pub fn set_debug(&mut self, debug: bool) { self.debug = debug }
 
     pub fn add_window(&mut self, identifier: I, window: Window) -> Option<Window> {
         todo!()
@@ -73,7 +75,48 @@ impl<I: Eq + Hash> Engine<I> {
     // #-----------#
 
     pub fn render(&mut self) {
-        todo!()
+        // Main render method
+
+        // Save cursor position, to be returned to later
+        queue!(stdout(), crossterm::cursor::SavePosition).unwrap();
+
+        self.flatten_windows();
+        let updated_chars = self.get_updated_positions();
+
+        let (cmds, pos) = self.generate_print_commands(&updated_chars);
+
+        self.queue_print_cmds(&cmds, &pos);
+
+        // Update display_buffer
+        // For each position in the diff list, clone the current_buffer into display_buffer position
+        // If clear_buffer = true, clear the current_buffer
+        for pos in &updated_chars {
+            self.display_buffer[pos.0][pos.1] = self.current_buffer[pos.0][pos.1].clone()
+        }
+
+        // Restore cursor, and do cmds
+        queue!(stdout(), crossterm::cursor::RestorePosition).unwrap();
+        stdout().flush().unwrap();
+
+        // Extra debug printing
+        // After rest of printing so it will always be on top
+        if self.debug {
+            let style = ContentStyle::new().black().on_white();
+
+            let line1 = StyledContent::new(
+                style,
+                format!("num updt: {:6}", updated_chars.len())
+            );
+            let line2 = StyledContent::new(
+                style,
+                format!("num cmds: {:6}", cmds.len())
+            );
+            execute!(stdout(),
+                MoveTo(0, 0), PrintStyledContent(line1),
+                MoveTo(0, 1), PrintStyledContent(line2),
+                crossterm::cursor::RestorePosition // Restore position again as it was moved again
+            ).unwrap();
+        }
     }
 
     fn flatten_windows(&mut self) {
@@ -101,6 +144,118 @@ impl<I: Eq + Hash> Engine<I> {
 
     }
 
+    fn get_updated_positions(&self) -> Vec<(usize, usize)> {
+        // Checks each current_buffer tile to the relative display_buffer tile to see if anything has changed
+        // Returns a list of positions that a change has occurred
+
+        let mut vec = vec![];
+
+        for y in 0..self.size.1 {
+            for x in 0..self.size.0 {
+
+                // Ignore if transparent
+                if self.current_buffer[x][y].is_none() { continue }
+
+                if self.current_buffer[x][y] != self.display_buffer[x][y] {
+                    vec.push((x, y))
+                }
+
+            }
+        }
+
+        vec
+    }
+
+    fn generate_print_commands(&self, pos_vec: &Vec<(usize, usize)>) -> (Vec<PrintStyledContent<String>>, Vec<(usize, usize)>) {
+        // Takes a vec of positions of updated chars and
+        // generates the print commands to then be queued
+        // Returns a vec of the commands and locations of said commands
+
+        let mut cmd_vec = vec![];
+        let mut cmd_pos_vec = vec![];
+
+        // Need at least 1 item in vec after here, so we can return an empty vec if no changes
+        if pos_vec.len() == 0 { return (cmd_vec, cmd_pos_vec) }
+
+        let mut cmd_str = String::from(self.get_current_char(pos_vec[0]));
+        let mut cmd_pos = pos_vec[0];
+        let mut cmd_style = self.get_current_style(pos_vec[0]);
+
+        // Comparing to previous item
+        for i in 1..pos_vec.len() {
+
+            // If current is nonconsecutive or on different row,
+            // what's stored currently is a complete cmd
+            if pos_vec[i-1].0+1 != pos_vec[i].0 || pos_vec[i].1 != pos_vec[i+1].1 {
+                let sc = StyledContent::new(cmd_style.clone(), cmd_str);
+                cmd_vec.push(PrintStyledContent(sc));
+                cmd_pos_vec.push(cmd_pos);
+
+                cmd_str = String::from(self.get_current_char(pos_vec[i]));
+                cmd_pos = pos_vec[i];
+                cmd_style = self.get_current_style(pos_vec[i]);
+
+                continue
+            }
+
+            // Compare style to previous
+            if self.get_current_style(pos_vec[i]) != self.get_current_style(pos_vec[i-1]) {
+                let sc = StyledContent::new(cmd_style.clone(), cmd_str);
+                cmd_vec.push(PrintStyledContent(sc));
+                cmd_pos_vec.push(cmd_pos);
+
+                cmd_str = String::from(self.get_current_char(pos_vec[i]));
+                cmd_pos = pos_vec[i];
+                cmd_style = self.get_current_style(pos_vec[i]);
+
+                continue
+            }
+
+            // At this point, current index is consecutive, on the same row, and has the same style
+            // So it can be appended to current cmd_str
+            cmd_str.push(self.get_current_char(pos_vec[i]))
+        }
+
+        // One last command push to make up for the last item in pos_vec
+        // It would either have started a new cmd, or be appended the last cmd
+        // Either way, needs to get dealt with manually
+        let sc = StyledContent::new(cmd_style.clone(), cmd_str);
+        cmd_vec.push(PrintStyledContent(sc));
+        cmd_pos_vec.push(cmd_pos);
+
+        (cmd_vec, cmd_pos_vec)
+    }
+
+    fn queue_print_cmds(&self, cmd_vec: &Vec<PrintStyledContent<String>>, pos_vec: &Vec<(usize, usize)>) {
+        // Takes a vec of print commands, and a vec of locations for those prints
+        // Adds each print cmd to queue, while also adding in mouse move cmds if necessary
+
+        // If there's nothing to do, just exit
+        if cmd_vec.is_empty() { return; }
+
+        // abs_pos is the position on the terminal
+        let mut abs_pos = self.to_absolute_pos(pos_vec[0]);
+        queue!(stdout(), MoveTo(abs_pos.0, abs_pos.1)).unwrap();
+
+        // len-1 because we will manually handle last command and don't want indexOOB
+        for i in 0..(cmd_vec.len()-1) {
+            queue!(stdout(), &cmd_vec[i]).unwrap();
+            // I think there should be a way to use iterator
+            // or something, since I don't need vec after this
+
+            // If consecutive, skip moving the cursor
+            if pos_vec[i].1 == pos_vec[i+1].0 && pos_vec[i].0+1 == pos_vec[i+1].0 {
+                continue
+            }
+
+            abs_pos = self.to_absolute_pos(pos_vec[i+1]);
+            queue!(stdout(), MoveTo(abs_pos.0, abs_pos.1)).unwrap();
+        }
+
+        // Handle last print cmd manually
+        queue!(stdout(), &cmd_vec[cmd_vec.len()-1]).unwrap();
+    }
+
     fn win_to_eng_pos(&self, win_pos: &(usize, usize), pos: &(usize, usize)) -> (usize, usize) {
         // Converts a window position into a position on the engines current_buffer
 
@@ -108,6 +263,26 @@ impl<I: Eq + Hash> Engine<I> {
         let y = pos.1 + win_pos.1 - self.position.1;
 
         (x, y)
+    }
+
+    fn to_absolute_pos(&self, pos: (usize, usize)) -> (u16, u16) {
+        // Takes a relative position and turns it into absolute position on terminal
+        // u16 so it is ready to be used in MoveTo commands
+
+        ((pos.0+self.position.0) as u16, (pos.1+self.position.1) as u16)
+    }
+
+    fn get_current_char(&self, pos: (usize, usize)) -> char {
+        // Convenience method for getting chars in current_buffer
+        // Assumes the position is valid,
+        // SO ONLY USE WITH RENDER METHOD WHERE THE VEC OF POSITIONS IS DEFINITELY VALID
+        self.current_buffer[pos.0][pos.1].as_ref().unwrap().char
+    }
+    fn get_current_style(&self, pos: (usize, usize)) -> ContentStyle {
+        // Convenience method for getting styles in current_buffer
+        // Assumes the position is valid,
+        // SO ONLY USE WITH RENDER METHOD WHERE THE VEC OF POSITIONS IS DEFINITELY VALID
+        self.current_buffer[pos.0][pos.1].as_ref().unwrap().style
     }
 
 }
@@ -159,246 +334,6 @@ impl TerminalRenderingEngine {
             current_buffer: vec![vec![StyledChar::default(); size.1]; size.0]
         }
     }
-
-    pub fn get_size(&self) -> &(usize, usize) { &self.size }
-    pub fn set_size(&mut self, size: (usize, usize)) {
-        // Resizes vecs to to fit new size
-
-        /*
-        Ok things get weird with the order of resizing
-
-        When indexing with [x][y], it means the vecs are being stored as:
-            - Outer vec of columns, each column being of the same X val
-            - Inner vec of chars within the column, each having a different Y val
-
-        So when resizing the inner vec, you have to resize to the new Y size,
-        and vice versa for the outer
-         */
-
-        // current_buffer
-        for x in 0..self.size.0 {
-            self.current_buffer[x].resize(size.1, self.default_char.clone())
-        }
-        self.current_buffer.resize(size.0, vec![self.default_char.clone(); size.1]);
-
-        // display_buffer
-        for x in 0..self.size.0 {
-            self.display_buffer[x].resize(size.1, None)
-        }
-        self.display_buffer.resize(size.0, vec![None; size.1]);
-
-        // Set new size var
-        self.size = size
-    }
-
-    pub fn get_position(&self) -> &(usize, usize) { &self.size }
-    pub fn set_position(&mut self, pos: (usize, usize)) { self.position = pos }
-
-    pub fn get_default_char(&self) -> &StyledChar { &self.default_char }
-    pub fn set_default_char(&mut self, default_char: StyledChar) { self.default_char = default_char }
-
-    pub fn set_clear_on_render(&mut self, clear: bool) {
-        // Whether or not the current_buffer should be cleared every time
-        // render is called. Does not affect the number of print calls
-        // given the same current_buffer
-
-        self.clear_buffer = clear;
-    }
-    pub fn set_debug(&mut self, debug: bool) { self.debug = debug }
-
-
-
-
-
-    // #-----------#
-    // | RENDERING |
-    // #-----------#
-
-    pub fn render(&mut self) -> usize {
-        // Main render method
-        // Returns number of print calls made
-
-        // Save cursor position, to be returned to later
-        queue!(stdout(), crossterm::cursor::SavePosition).unwrap();
-
-        let updated_chars = self.get_updated_positions();
-        let mut cmd_positions = updated_chars.clone();
-        let mut commands = vec![];
-
-
-        // Add a print command for every char that has been updated
-        for pos in &updated_chars {
-            commands.push(PrintStyledContent(self.current_buffer[pos.0][pos.1].clone().into()));
-        }
-
-
-        // Combine consecutive print commands that have the same styling
-        self.combine_print_cmds(&mut commands, &mut cmd_positions);
-
-
-        // Queue each print command, add extra move mouse if they aren't consecutive
-        self.queue_print_cmds(&commands, &cmd_positions);
-
-
-        // Update display_buffer
-            // For each position in the diff list, clone the current_buffer into display_buffer position
-            // If clear_buffer = true, clear the current_buffer
-        for pos in &updated_chars {
-            self.display_buffer[pos.0][pos.1] = Some(self.current_buffer[pos.0][pos.1].clone())
-        }
-
-        if self.clear_buffer {
-            for pos in &updated_chars {
-                self.current_buffer[pos.0][pos.1] = StyledChar::default()
-            }
-        }
-
-
-        queue!(stdout(), crossterm::cursor::RestorePosition).unwrap();
-        stdout().flush().unwrap();
-
-        // Extra debug printing
-        // After rest of printing so it will always be on top
-        if self.debug {
-            let style = ContentStyle::new().black().on_white();
-
-            let line1 = StyledContent::new(
-                style,
-                format!("num updt: {:6}", updated_chars.len())
-            );
-            let line2 = StyledContent::new(
-                style,
-                format!("num cmds: {:6}", commands.len())
-            );
-            execute!(stdout(),
-                MoveTo(0, 0), PrintStyledContent(line1),
-                MoveTo(0, 1), PrintStyledContent(line2),
-                crossterm::cursor::RestorePosition // Restore position again as it was moved again
-            ).unwrap();
-        }
-
-        commands.len()
-    }
-    
-    fn get_updated_positions(&self) -> Vec<(usize, usize)> {
-        // Checks each current_buffer tile to the relative display_buffer tile to see if anything has changed
-        // Returns a list of positions that a change has occurred
-
-        let mut vec = vec![];
-
-        for y in 0..self.size.1 {
-            for x in 0..self.size.0 {
-
-                if self.display_buffer[x][y].is_none() {
-                    vec.push((x, y))
-                }
-
-                // I can only compare the value in the display option if I unwrap,
-                // but I can only unwrap if it's a ref or else it takes ownership/consumes the value
-                // Therefor LHS has to be ref as well so it is same type
-                else if &self.current_buffer[x][y] != self.display_buffer[x][y].as_ref().unwrap() {
-                    vec.push((x, y))
-                }
-
-            }
-        }
-
-        vec
-    }
-
-    fn combine_print_cmds(&self, cmd_vec: &mut Vec<PrintStyledContent<String>>, pos_vec: &mut Vec<(usize, usize)>) {
-        // Combines print cmd_vec that are consecutive and have the same styling
-        // Check there is at least 2 cmds to combine
-        if cmd_vec.len() < 2 { return }
-
-        // Check each cmd to previous -> start i at 1
-        let mut i = 1;
-        while i < cmd_vec.len() {
-
-            // they are NOT consecutive AND they are on different rows
-            // Having to add content length cause pos vec indicates the start of the string to be printed
-            // Would always return false for cmds of 2 chars
-            if pos_vec[i].0 != pos_vec[i-1].0+cmd_vec[i-1].0.content().len() || pos_vec[i].1 != pos_vec[i-1].1 {
-                i+=1;
-                continue
-            }
-
-            if cmd_vec[i].0.style() == cmd_vec[i-1].0.style() {
-                // Combine the content
-                let content1 = cmd_vec[i-1].0.content();
-                let content2 = cmd_vec[i].0.content();
-
-                // I'm getting the feeling like this is bad and wrong
-                let mut new_content: String = content1.clone();
-                new_content.push_str(content2.clone().as_str());
-
-                let new_cmd = PrintStyledContent(
-                    StyledContent::new(cmd_vec[i].0.style().clone(), new_content)
-                );
-
-                // Replace first two items in vec with new command
-                cmd_vec[i-1] = new_cmd;
-                cmd_vec.remove(i);
-                pos_vec.remove(i);
-
-                // Skip incrementation, as we want to compare new ith object to now combined i-1th object
-                continue
-            }
-
-            i+=1;
-        }
-    }
-
-    fn queue_print_cmds(&self, cmd_vec: &Vec<PrintStyledContent<String>>, pos_vec: &Vec<(usize, usize)>) {
-        // Takes a vec of print commands, and a vec of locations for those prints
-        // Adds each print cmd to queue, while also adding in mouse move cmds if necessary
-
-
-        // If there's nothing to do, just exit
-        if cmd_vec.is_empty() { return; }
-
-
-        // abs_pos is the position on the terminal
-        // Is the position in the vec, plus the engine position as an offset
-        let mut abs_pos = self.to_absolute_pos(pos_vec[0]);
-        queue!(stdout(), MoveTo(abs_pos.0, abs_pos.1)).unwrap();
-
-
-        // len-1 because we will manually handle last command and don't want indexOOB
-        for i in 0..(cmd_vec.len()-1) {
-            queue!(stdout(), cmd_vec[i].clone()).unwrap(); // Clone as queue takes ownership
-                                                           // I think there should be a way to use iterator
-                                                           // or something, since I don't need vec after this
-
-            // Consecutive check
-            if pos_vec[i].1 == pos_vec[i+1].1         // Same Y
-                && pos_vec[i].0+1 == pos_vec[i+1].0 { // Next is one x ahead
-                continue
-            }
-
-            abs_pos = self.to_absolute_pos(pos_vec[i+1]);
-            queue!(stdout(), MoveTo(abs_pos.0, abs_pos.1)).unwrap();
-        }
-
-
-        // Handle last print cmd manually
-        queue!(stdout(), cmd_vec[cmd_vec.len()-1].clone()).unwrap();
-    }
-
-    fn to_absolute_pos(&self, pos: (usize, usize)) -> (u16, u16) {
-        // Takes a relative position and turns it into absolute position on terminal
-        // u16 so it is ready to be used in MoveTo commands
-
-        ((pos.0+self.position.0) as u16, (pos.1+self.position.1) as u16)
-    }
-
-
-
-
-
-    // #-------------------#
-    // | USER MANIPULATION |
-    // #-------------------#
 
     fn is_valid_pos(&self, pos: &(usize, usize)) -> bool {
         // Validate pos is within area

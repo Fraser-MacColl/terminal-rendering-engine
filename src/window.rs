@@ -10,9 +10,6 @@ pub struct Window {
     // If buffer should clear after every update, or keep previous state which can then be edited as necessary
     clear_buffer: bool,
 
-    // Prints extra debug information at a set absolute location on terminal
-    debug: bool,
-
     // Buffer that holds char data of this window
     // None represents transparency
     char_data: Vec<Vec<Option<StyledChar>>>,
@@ -26,7 +23,6 @@ impl Window {
             depth,
             size,
             clear_buffer: false,
-            debug: false,
             char_data: vec![vec![None; size.1]; size.0],
         }
     }
@@ -68,7 +64,6 @@ impl Window {
 
         self.clear_buffer = clear;
     }
-    pub fn set_debug(&mut self, debug: bool) { self.debug = debug }
 
     pub fn get_char(&self, pos: &(usize, usize)) -> &Option<StyledChar> {
         // Returns a ref to char information at a given location
