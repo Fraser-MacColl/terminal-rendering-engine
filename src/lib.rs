@@ -58,8 +58,9 @@ impl<I: Eq + Hash> Engine<I> {
     pub fn set_debug(&mut self, debug: bool) { self.debug = debug }
 
     pub fn add_window(&mut self, identifier: I, window: Window) -> Option<Window> {
-        todo!()
+        // todo
         // Remember to resize buffers if new windows extend beyond their bounds
+        self.windows.insert(identifier, window)
     }
 
     pub fn get_window(&self, identifier: &I) -> Option<&Window> {
@@ -186,7 +187,7 @@ impl<I: Eq + Hash> Engine<I> {
 
             // If current is nonconsecutive or on different row,
             // what's stored currently is a complete cmd
-            if pos_vec[i-1].0+1 != pos_vec[i].0 || pos_vec[i].1 != pos_vec[i+1].1 {
+            if pos_vec[i-1].0+1 != pos_vec[i].0 || pos_vec[i].1 != pos_vec[i-1].1 {
                 let sc = StyledContent::new(cmd_style.clone(), cmd_str);
                 cmd_vec.push(PrintStyledContent(sc));
                 cmd_pos_vec.push(cmd_pos);
@@ -219,7 +220,7 @@ impl<I: Eq + Hash> Engine<I> {
         // One last command push to make up for the last item in pos_vec
         // It would either have started a new cmd, or be appended the last cmd
         // Either way, needs to get dealt with manually
-        let sc = StyledContent::new(cmd_style.clone(), cmd_str);
+        let sc = StyledContent::new(cmd_style, cmd_str);
         cmd_vec.push(PrintStyledContent(sc));
         cmd_pos_vec.push(cmd_pos);
 
