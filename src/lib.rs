@@ -1,3 +1,7 @@
+mod window;
+mod style;
+
+use std::collections::HashMap;
 use std::fmt::Display;
 use crossterm::style::{Print, PrintStyledContent, Stylize};
 use std::io::{stdout, Write};
@@ -12,37 +16,47 @@ pub use crossterm::style::{
     Color,
     Attribute, Attributes
 };
+use crate::style::StyledChar;
+use crate::window::Window;
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct StyledChar {
-    // Default is an empty (space) char with no colouring or attributes
-    pub char: char,
-    pub style: ContentStyle
+pub struct Engine<I> {
+    // Map of windows/layers, along with an identifier for said window
+    windows: HashMap<I, Window>,
+
+    // The char that should be used
+    clear_char: StyledChar,
+
+    // Buffers for what is being currently displayed, and one that is being currently edited
+    //
+    // display_buffer None is an unknown state. For example if the area was extended, the chars in the new area
+    // are of an unknown state; They could be anything so we can't track if they should be updated or not.
+    //
+    // current_buffer None represents transparency, and shouldn't updated the currently displayed char, even
+    // if that is a char of unknown state.
+    display_buffer: Vec<Vec<Option<StyledChar>>>,
+    current_buffer: Vec<Vec<Option<StyledChar>>>,
+
+    // Information on the buffers
+    position: (usize, usize),
+    size: (usize, usize)
 }
 
-impl From<char> for StyledChar {
-    fn from(char: char) -> Self {
-        StyledChar {
-            char,
-            style: ContentStyle::default()
-        }
+impl<I> Engine<I> {
+
+    fn flatten_windows(&mut self) {
+        // Takes all the windows, and flattens char data from them into current_buffer
+        self.windows.
     }
+
 }
 
-impl From<StyledChar> for StyledContent<String> {
-    fn from(styled_char: StyledChar) -> Self {
-        StyledContent::new(styled_char.style, styled_char.char.to_string())
-    }
-}
 
-impl Default for StyledChar {
-    fn default() -> Self {
-        StyledChar {
-            char: ' ',
-            style: ContentStyle::default() //Default is None colour, no attributes
-        }
-    }
-}
+
+
+
+
+
+
 
 
 

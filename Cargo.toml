@@ -1,5 +1,5 @@
 [package]
-name = "terminal_rendering_engine"
+name = "terminal-rendering-engine"
 version = "0.1.0"
 edition = "2021"
 
