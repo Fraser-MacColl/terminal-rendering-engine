@@ -1,9 +1,10 @@
-mod window;
-mod style;
+pub mod window;
+pub mod style;
 
 use std::collections::HashMap;
 use std::fmt::Display;
-use crossterm::style::{Print, PrintStyledContent, Stylize};
+use std::hash::Hash;
+use crossterm::style::{Print, PrintStyledContent};
 use std::io::{stdout, Write};
 use std::ops::Range;
 use crossterm::{execute, queue};
@@ -12,7 +13,7 @@ use crossterm::cursor::MoveTo;
 // Re-export enums and structs used in library
 // Why reinvent the wheel?
 pub use crossterm::style::{
-    ContentStyle, StyledContent,
+    ContentStyle, StyledContent, Stylize,
     Color,
     Attribute, Attributes
 };
@@ -23,7 +24,7 @@ pub struct Engine<I> {
     // Map of windows/layers, along with an identifier for said window
     windows: HashMap<I, Window>,
 
-    // The char that should be used
+    // The char that should be used when clearing
     clear_char: StyledChar,
 
     // Buffers for what is being currently displayed, and one that is being currently edited
@@ -41,11 +42,72 @@ pub struct Engine<I> {
     size: (usize, usize)
 }
 
-impl<I> Engine<I> {
+impl<I: Eq + Hash> Engine<I> {
+
+    pub fn new(position: (usize, usize), size: (usize, usize)) -> Engine<I> {
+        Engine {
+            windows: HashMap::new(),
+            clear_char: StyledChar::default(),
+            display_buffer: vec![vec![None; size.1]; size.0],
+            current_buffer: vec![vec![None; size.1]; size.0],
+            position,
+            size,
+        }
+    }
+
+    pub fn add_window(&mut self, identifier: I, window: Window) -> Option<Window> {
+        todo!()
+        // Remember to resize buffers if new windows extend beyond their bounds
+    }
+
+    pub fn get_window(&self, identifier: &I) -> Option<&Window> {
+        self.windows.get(identifier)
+    }
+
+
+
+
+
+    // #-----------#
+    // | RENDERING |
+    // #-----------#
+
+    pub fn render(&mut self) {
+        todo!()
+    }
 
     fn flatten_windows(&mut self) {
         // Takes all the windows, and flattens char data from them into current_buffer
-        self.windows.
+
+        let mut windows: Vec<&Window> = self.windows.values().collect();
+        windows.sort_unstable_by_key(|k| k.get_depth()); // Sorts vec by lowest depth first
+
+        // Iterate over windows, lowest first
+        for win in windows.iter()
+        {
+            // Iterate through each char in win
+            for y in 0..win.get_size().1 {
+                for x in 0..win.get_size().0 {
+                    let eng_pos = self.win_to_eng_pos(win.get_position(), &(x, y));
+                    let win_char = win.get_char(&(x,y));
+
+                    match win_char {
+                        Some(_) => self.current_buffer[eng_pos.0][eng_pos.1] = win_char.clone(),
+                        None    => continue
+                    }
+                }
+            }
+        }
+
+    }
+
+    fn win_to_eng_pos(&self, win_pos: &(usize, usize), pos: &(usize, usize)) -> (usize, usize) {
+        // Converts a window position into a position on the engines current_buffer
+
+        let x = pos.0 + win_pos.0 - self.position.0;
+        let y = pos.1 + win_pos.1 - self.position.1;
+
+        (x, y)
     }
 
 }
