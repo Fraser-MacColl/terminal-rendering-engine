@@ -2,11 +2,9 @@ pub mod window;
 pub mod style;
 
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::hash::Hash;
 use crossterm::style::PrintStyledContent;
 use std::io::{stdout, Write};
-use std::ops::Range;
 use crossterm::{execute, queue};
 use crossterm::cursor::MoveTo;
 
@@ -325,6 +323,8 @@ impl<I: Eq + Hash> Engine<I> {
         queue!(stdout(), &cmd_vec[cmd_vec.len()-1]).unwrap();
     }
 
+
+
     fn win_to_eng_pos(&self, win_pos: &(usize, usize), pos: &(usize, usize)) -> (usize, usize) {
         // Converts a window position into a position on the engines current_buffer
 
@@ -341,12 +341,15 @@ impl<I: Eq + Hash> Engine<I> {
         ((pos.0+self.position.0) as u16, (pos.1+self.position.1) as u16)
     }
 
+
+
     fn get_current_char(&self, pos: (usize, usize)) -> char {
         // Convenience method for getting chars in current_buffer
         // Assumes the position is valid,
         // SO ONLY USE WITH RENDER METHOD WHERE THE VEC OF POSITIONS IS DEFINITELY VALID
         self.current_buffer[pos.0][pos.1].as_ref().unwrap().char
     }
+
     fn get_current_style(&self, pos: (usize, usize)) -> ContentStyle {
         // Convenience method for getting styles in current_buffer
         // Assumes the position is valid,
@@ -354,161 +357,4 @@ impl<I: Eq + Hash> Engine<I> {
         self.current_buffer[pos.0][pos.1].as_ref().unwrap().style
     }
 
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-pub struct TerminalRenderingEngine {
-    // End user struct that holds drawing area information
-
-    position: (usize, usize),
-    size: (usize, usize),
-
-    // If buffer should clear after every update, or keep previous state which can then be edited as necessary
-    clear_buffer: bool,
-
-    // Prints extra debug information at a set absolute location on terminal
-    debug: bool,
-    default_char: StyledChar,
-
-    // Buffers that hold what's currently displayed, along with editable buffer
-    // None represents a pos with an unknown state, which will be forced to update next render
-    //
-    // If render area is resized larger, terminal chars with unknown states will be within region.
-    // If they already are styled, this won't necessarily be updated unless forced to do so.
-    display_buffer: Vec<Vec<Option<StyledChar>>>,
-    current_buffer: Vec<Vec<StyledChar>>
-}
-
-impl TerminalRenderingEngine {
-
-    pub fn new(position: (usize, usize), size: (usize, usize)) -> TerminalRenderingEngine {
-        TerminalRenderingEngine {
-            position,
-            size,
-            clear_buffer: false,
-            debug: false,
-            default_char: StyledChar::default(),
-            display_buffer: vec![vec![None; size.1]; size.0],
-            current_buffer: vec![vec![StyledChar::default(); size.1]; size.0]
-        }
-    }
-
-    fn is_valid_pos(&self, pos: &(usize, usize)) -> bool {
-        // Validate pos is within area
-        // Don't need to check < as unsigned (no negatives)
-        if pos.0 >= self.size.0 { return false }
-        if pos.1 >= self.size.1 { return false }
-
-        true
-    }
-
-    pub fn draw<T: Display>(&mut self, pos: (usize, usize), item: T) {
-        // Pos is index to start inserting item from
-        // If item exceeds area, it is ignored
-        if !self.is_valid_pos(&pos) { return; }
-
-        let str = item.to_string();
-        let mut chars = str.chars();
-        for i in 0..str.len() {
-            // If there is a char
-            if let Some(c) = chars.next() {
-
-                // Don't bother with the rest
-                if pos.0+i >= self.size.0 { return; }
-
-                self.current_buffer[pos.0+i][pos.1] = StyledChar::from(c)
-
-            }
-        }
-    }
-    pub fn draw_styled<T: Display>(&mut self, pos: (usize, usize), item: T, style: ContentStyle) {
-        // Pos is index to start inserting item from
-        // If item exceeds area, it is ignored
-        if !self.is_valid_pos(&pos) { return; }
-
-        let str = item.to_string();
-        let mut chars = str.chars();
-        for i in 0..str.len() {
-            // If there is a char
-            if let Some(c) = chars.next() {
-
-                // Don't bother with the rest
-                if pos.0+i >= self.size.0 { return; }
-
-                self.current_buffer[pos.0+i][pos.1] = StyledChar{ char: c, style: style.clone() }
-
-            }
-        }
-    }
-
-    pub fn clear(&mut self) {
-        // Clears the area with default char
-
-        for y in 0..self.size.1 {
-            for x in 0..self.size.0 {
-                self.current_buffer[x][y] = self.default_char.clone();
-            }
-        }
-    }
-    pub fn fill(&mut self, fill_char: StyledChar) {
-        // Fills area with specific char
-
-        for y in 0..self.size.1 {
-            for x in 0..self.size.0 {
-                self.current_buffer[x][y] = fill_char.clone()
-            }
-        }
-    }
-    pub fn fill_row(&mut self, row: usize, fill_char: StyledChar) {
-        // Fills a row with a character
-
-        if row >= self.size.1 { return; } // index OOB
-
-        for x in 0..self.size.0 {
-            self.current_buffer[x][row] = fill_char.clone()
-        }
-    }
-    pub fn fill_column(&mut self, column: usize, fill_char: StyledChar) {
-        // Fills a column with a character
-
-        if column >= self.size.0 { return; } // index OOB
-
-        for y in 0..self.size.1 {
-            self.current_buffer[column][y] = fill_char.clone()
-        }
-    }
-
-    pub fn set_style_square(&mut self, x_range: Range<usize>, y_range: Range<usize>, style: ContentStyle) {
-        // Change the style for a group of chars in the square specified
-
-        for y in y_range {
-            if y >= self.size.1 { break }
-
-            for x in x_range.clone() { // Clone as using it here turns it into a iter, which consumes values, then being unable to use next loop
-                if x >= self.size.0 { break } // Break if we're indexing outside valid area
-
-                self.current_buffer[x][y].style = style.clone()
-            }
-        }
-    }
-    pub fn set_global_style(&mut self, style: ContentStyle) {
-        // Sets the style for all tiles
-
-        for y in 0..self.size.1 {
-            for x in 0..self.size.0 {
-                self.current_buffer[x][y].style = style.clone()
-            }
-        }
-    }
 }
