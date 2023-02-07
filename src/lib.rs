@@ -44,15 +44,21 @@ pub struct Engine<I> {
 
 impl<I: Eq + Hash> Engine<I> {
 
-    pub fn new() -> Engine<I> {
-        Engine {
+    pub fn new(identifier: I, win: Window) -> Engine<I> {
+        let position = win.get_position();
+        let size = win.get_size();
+        let mut e = Engine {
             windows: HashMap::new(),
             debug: false,
-            display_buffer: vec![vec![]],
-            current_buffer: vec![vec![]],
-            position: (100_000_000, 100_000_000), // Arbitrary high value so that the position is always updated on first window addition
-            size: (0, 0),
-        }
+            display_buffer: vec![vec![None; size.1]; size.0],
+            current_buffer: vec![vec![None; size.1]; size.0],
+            position: position.clone(),
+            size: size.clone(),
+        };
+
+        e.windows.insert(identifier, win);
+
+        e
     }
 
     pub fn set_debug(&mut self, debug: bool) { self.debug = debug }
@@ -61,24 +67,28 @@ impl<I: Eq + Hash> Engine<I> {
         // Add window to hashmap
         // Checks to make sure internal vec sizes and the like don't need updating
 
-        println!("x Left");
         // x Left
         if window.get_position().0 < self.position.0 {
-            println!("start");
             let diff = self.position.0 - window.get_position().0;
 
-            println!("updating self");
             self.position.0 -= diff;
             self.size.0 += diff;
 
-            println!("inserting");
             // Have to add diff number of new rows
             for _ in 0..diff { self.current_buffer.insert(0, vec![None; self.size.1]); }
             for _ in 0..diff { self.display_buffer.insert(0, vec![None; self.size.1]); }
-            println!("Done!");
         }
 
-        println!("y Up");
+        // x Right
+        if window.get_position().0+window.get_size().0 > self.position.0+self.size.0 {
+            let diff = window.get_position().0+window.get_size().1 - self.position.0+self.size.0;
+
+            self.size.0 += diff;
+
+            self.current_buffer.resize(self.size.0, vec![None; self.size.1]);
+            self.display_buffer.resize(self.size.0, vec![None; self.size.1]);
+        }
+
         // y Up
         if window.get_position().1 < self.position.1 {
             let diff = self.position.1 - window.get_position().1;
@@ -95,10 +105,9 @@ impl<I: Eq + Hash> Engine<I> {
             }
         }
 
-        println!("y Down");
         // y Down
         if window.get_position().1+window.get_size().1 > self.position.1+self.size.1 {
-            let diff = window.get_position().1+window.get_size().1 - self.position.1+self.size.1;
+            let diff = window.get_position().1 + window.get_size().1 - self.position.1 + self.size.1;
 
             self.size.1 += diff;
 
@@ -106,7 +115,6 @@ impl<I: Eq + Hash> Engine<I> {
             for x in &mut self.display_buffer { x.resize(self.size.1, None) }
         }
 
-        println!("Adding to hashmap");
         self.windows.insert(identifier, window)
     }
 
