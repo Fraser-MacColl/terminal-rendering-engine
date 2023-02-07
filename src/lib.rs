@@ -81,7 +81,8 @@ impl<I: Eq + Hash> Engine<I> {
 
         // x Right
         if window.get_position().0+window.get_size().0 > self.position.0+self.size.0 {
-            let diff = window.get_position().0+window.get_size().1 - self.position.0+self.size.0;
+            // Idk why but without brackets it adds weird to way too big a num
+            let diff = (window.get_position().0+window.get_size().0) - (self.position.0+self.size.0);
 
             self.size.0 += diff;
 
@@ -107,7 +108,8 @@ impl<I: Eq + Hash> Engine<I> {
 
         // y Down
         if window.get_position().1+window.get_size().1 > self.position.1+self.size.1 {
-            let diff = window.get_position().1 + window.get_size().1 - self.position.1 + self.size.1;
+            // See x Right
+            let diff = (window.get_position().1+window.get_size().1) - (self.position.1+self.size.1);
 
             self.size.1 += diff;
 
