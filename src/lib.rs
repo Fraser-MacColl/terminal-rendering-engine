@@ -44,22 +44,69 @@ pub struct Engine<I> {
 
 impl<I: Eq + Hash> Engine<I> {
 
-    pub fn new(position: (usize, usize), size: (usize, usize)) -> Engine<I> {
+    pub fn new() -> Engine<I> {
         Engine {
             windows: HashMap::new(),
             debug: false,
-            display_buffer: vec![vec![None; size.1]; size.0],
-            current_buffer: vec![vec![None; size.1]; size.0],
-            position,
-            size,
+            display_buffer: vec![vec![]],
+            current_buffer: vec![vec![]],
+            position: (100_000_000, 100_000_000), // Arbitrary high value so that the position is always updated on first window addition
+            size: (0, 0),
         }
     }
 
     pub fn set_debug(&mut self, debug: bool) { self.debug = debug }
 
     pub fn add_window(&mut self, identifier: I, window: Window) -> Option<Window> {
-        // todo
-        // Remember to resize buffers if new windows extend beyond their bounds
+        // Add window to hashmap
+        // Checks to make sure internal vec sizes and the like don't need updating
+
+        println!("x Left");
+        // x Left
+        if window.get_position().0 < self.position.0 {
+            println!("start");
+            let diff = self.position.0 - window.get_position().0;
+
+            println!("updating self");
+            self.position.0 -= diff;
+            self.size.0 += diff;
+
+            println!("inserting");
+            // Have to add diff number of new rows
+            for _ in 0..diff { self.current_buffer.insert(0, vec![None; self.size.1]); }
+            for _ in 0..diff { self.display_buffer.insert(0, vec![None; self.size.1]); }
+            println!("Done!");
+        }
+
+        println!("y Up");
+        // y Up
+        if window.get_position().1 < self.position.1 {
+            let diff = self.position.1 - window.get_position().1;
+
+            self.position.1 -= diff;
+            self.size.1 += diff;
+
+            for x in &mut self.current_buffer {
+                // Have to add a new element for each new line
+                for _ in 0..diff { x.insert(0, None) }
+            }
+            for x in &mut self.display_buffer {
+                for _ in 0..diff { x.insert(0, None) }
+            }
+        }
+
+        println!("y Down");
+        // y Down
+        if window.get_position().1+window.get_size().1 > self.position.1+self.size.1 {
+            let diff = window.get_position().1+window.get_size().1 - self.position.1+self.size.1;
+
+            self.size.1 += diff;
+
+            for x in &mut self.current_buffer { x.resize(self.size.1, None) }
+            for x in &mut self.display_buffer { x.resize(self.size.1, None) }
+        }
+
+        println!("Adding to hashmap");
         self.windows.insert(identifier, window)
     }
 
@@ -112,9 +159,20 @@ impl<I: Eq + Hash> Engine<I> {
                 style,
                 format!("num cmds: {:6}", cmds.len())
             );
+            let line3 = StyledContent::new(
+                style,
+                format!("size: {:3?}", self.size)
+            );
+            let line4 = StyledContent::new(
+                style,
+                format!("pos:  {:3?}", self.position)
+            );
+
             execute!(stdout(),
                 MoveTo(0, 0), PrintStyledContent(line1),
                 MoveTo(0, 1), PrintStyledContent(line2),
+                MoveTo(0, 2), PrintStyledContent(line3),
+                MoveTo(0, 3), PrintStyledContent(line4),
                 crossterm::cursor::RestorePosition // Restore position again as it was moved again
             ).unwrap();
         }
