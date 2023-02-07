@@ -58,13 +58,14 @@ impl Window {
     pub fn get_position(&self) -> &(usize, usize) { &self.position }
     pub fn set_position(&mut self, pos: (usize, usize)) { self.position = pos }
 
-    pub fn set_clear_on_render(&mut self, clear: bool) {
+    pub fn set_clear_buffer(&mut self, clear: bool) {
         // Whether or not the current_buffer should be cleared every time
         // render is called. Does not affect the number of print calls
         // given the same current_buffer
 
         self.clear_buffer = clear;
     }
+    pub fn get_clear_buffer(&self) -> &bool { &self.clear_buffer }
 
     pub fn get_char(&self, pos: &(usize, usize)) -> &Option<StyledChar> {
         // Returns a ref to char information at a given location

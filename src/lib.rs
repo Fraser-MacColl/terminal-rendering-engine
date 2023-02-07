@@ -118,9 +118,7 @@ impl<I: Eq + Hash> Engine<I> {
         self.windows.insert(identifier, window)
     }
 
-    pub fn get_window(&self, identifier: &I) -> Option<&Window> {
-        self.windows.get(identifier)
-    }
+    pub fn get_window(&mut self, identifier: &I) -> Option<&mut Window> { self.windows.get_mut(identifier) }
 
 
 
@@ -183,6 +181,11 @@ impl<I: Eq + Hash> Engine<I> {
                 MoveTo(0, 3), PrintStyledContent(line4),
                 crossterm::cursor::RestorePosition // Restore position again as it was moved again
             ).unwrap();
+        }
+
+        // Clear char data in windows that have clear_buffer true
+        for win in self.windows.values_mut() {
+            if *win.get_clear_buffer() { win.clear() } // Idk really know what the dereference is for here, but I need it apparently
         }
     }
 
